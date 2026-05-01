@@ -288,9 +288,8 @@ func main() {
 			}
 		}
 
-		// Trigger /all when message starts with "зкд" or "zkd" (any case)
 		lower := strings.ToLower(msg.Text)
-		if lower == "зкд" || strings.HasPrefix(lower, "зкд ") || lower == "zkd" || strings.HasPrefix(lower, "zkd ") {
+		if lower == "калл" || strings.HasPrefix(lower, "калл ") || lower == "call" || strings.HasPrefix(lower, "call ") {
 			if msg.From != nil && !isBlocked(db, msg.From.ID) {
 				users, err := getUsers(db, chatID)
 				if err == nil && len(users) > 0 {
