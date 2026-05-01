@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	_ "github.com/lib/pq"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	_ "github.com/lib/pq"
 )
 
 func initDB(db *sql.DB) error {
@@ -120,7 +120,9 @@ func main() {
 			if err != nil || len(mentions) == 0 {
 				reply = tgbotapi.NewMessage(chatID, "Нет известных участников. Участники добавляются автоматически когда пишут в чат.")
 			} else {
-				text := strings.Join(mentions, " ")
+				// Hidden mentions wrapped in invisible tag — triggers notifications without showing names
+				hidden := `<span class="tg-spoiler">` + strings.Join(mentions, " ") + `</span>`
+				text := "📢 Жігіттер!\n" + hidden
 				reply = tgbotapi.NewMessage(chatID, text)
 				reply.ParseMode = tgbotapi.ModeHTML
 			}
