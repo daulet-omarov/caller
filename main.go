@@ -146,56 +146,58 @@ func handleOwnerCommand(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message)
 
 	switch msg.Command() {
 	case "block":
-		// /block USER_ID
 		arg := strings.TrimSpace(msg.CommandArguments())
 		userID, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Использование: /block USER_ID"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Қолданысы: /block USER_ID"))
 			return
 		}
 		if err := blockUser(db, userID); err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
+			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Қате: %v", err)))
 			return
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("🚫 Пользователь %d заблокирован", userID)))
+		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("🚫 %d пайдаланушысы бұғатталды", userID)))
 
 	case "unblock":
-		// /unblock USER_ID
 		arg := strings.TrimSpace(msg.CommandArguments())
 		userID, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "Использование: /unblock USER_ID"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Қолданысы: /unblock USER_ID"))
 			return
 		}
 		if err := unblockUser(db, userID); err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
+			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Қате: %v", err)))
 			return
 		}
-		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Пользователь %d разблокирован", userID)))
+		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ %d пайдаланушысының бұғаты ашылды", userID)))
 
 	case "blocked":
 		ids, err := getBlockedUsers(db)
 		if err != nil || len(ids) == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "Заблокированных пользователей нет."))
+			bot.Send(tgbotapi.NewMessage(chatID, "Бұғатталған пайдаланушылар жоқ."))
 			return
 		}
 		var sb strings.Builder
-		sb.WriteString("🚫 Заблокированные:\n\n")
+		sb.WriteString("🚫 Бұғатталғандар:\n\n")
 		for _, id := range ids {
 			sb.WriteString(fmt.Sprintf("• %d\n", id))
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, sb.String()))
 
 	case "users":
-		rows, err := db.Query(`SELECT user_id, username, first_name FROM chat_users ORDER BY first_name`)
+		rows, err := db.Query(`
+			SELECT DISTINCT ON (user_id) user_id, username, first_name
+			FROM chat_users
+			ORDER BY user_id, first_name
+		`)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
+			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Қате: %v", err)))
 			return
 		}
 		defer rows.Close()
 
 		var sb strings.Builder
-		sb.WriteString("👥 Пользователи:\n\n")
+		sb.WriteString("👥 Пайдаланушылар:\n\n")
 		count := 0
 		for rows.Next() {
 			var userID int64
@@ -207,17 +209,17 @@ func handleOwnerCommand(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message)
 			count++
 		}
 		if count == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "Пользователей нет."))
+			bot.Send(tgbotapi.NewMessage(chatID, "Пайдаланушылар жоқ."))
 			return
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, sb.String()))
 
 	case "start", "help":
-		help := "Команды владельца:\n\n" +
-			"/block USER_ID — закрыть доступ к /all\n" +
-			"/unblock USER_ID — открыть доступ\n" +
-			"/blocked — список заблокированных\n" +
-			"/users — список всех пользователей"
+		help := "Иесінің командалары:\n\n" +
+			"/block USER_ID — /all қолжетімділігін жабу\n" +
+			"/unblock USER_ID — қолжетімділікті ашу\n" +
+			"/blocked — бұғатталғандар тізімі\n" +
+			"/users — барлық пайдаланушылар тізімі"
 		bot.Send(tgbotapi.NewMessage(chatID, help))
 	}
 }
@@ -252,8 +254,8 @@ func main() {
 
 	// Register visible commands for users
 	bot.Send(tgbotapi.NewSetMyCommands(
-		tgbotapi.BotCommand{Command: "all", Description: "Тегнуть всех участников чата"},
-		tgbotapi.BotCommand{Command: "help", Description: "Помощь"},
+		tgbotapi.BotCommand{Command: "all", Description: "Чаттың барлық қатысушыларын белгілеу"},
+		tgbotapi.BotCommand{Command: "help", Description: "Анықтама"},
 	))
 
 	u := tgbotapi.NewUpdate(0)
@@ -297,7 +299,7 @@ func main() {
 			}
 
 			if isBlocked(db, msg.From.ID) {
-				reply := tgbotapi.NewMessage(chatID, "❌ У вас нет доступа к этой команде.")
+				reply := tgbotapi.NewMessage(chatID, "❌ Сен байғұста бұл командаға қолжетімділік жоқ.")
 				reply.ReplyToMessageID = msg.MessageID
 				bot.Send(reply)
 				continue
@@ -307,7 +309,7 @@ func main() {
 			var reply tgbotapi.MessageConfig
 
 			if err != nil || len(users) == 0 {
-				reply = tgbotapi.NewMessage(chatID, "Нет известных участников.")
+				reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
 			} else {
 				reply = buildAllMessage(chatID, users)
 			}
@@ -318,7 +320,7 @@ func main() {
 			}
 
 		case "start", "help":
-			help := "Команды:\n/all — тегнуть всех участников чата"
+			help := "Командалар:\n/all — чаттың барлық қатысушыларын белгілеу"
 			reply := tgbotapi.NewMessage(chatID, help)
 			if _, err := bot.Send(reply); err != nil {
 				log.Printf("send error: %v", err)
