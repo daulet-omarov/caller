@@ -289,7 +289,7 @@ func main() {
 		}
 
 		// Trigger /all when message starts with "зкд"
-		if msg.Text == "зкд" || strings.HasPrefix(strings.ToLower(msg.Text), "зкд ") {
+		if strings.ToLower(msg.Text) == "зкд" || strings.HasPrefix(strings.ToLower(msg.Text), "зкд ") {
 			if msg.From != nil && !isBlocked(db, msg.From.ID) {
 				users, err := getUsers(db, chatID)
 				if err == nil && len(users) > 0 {
