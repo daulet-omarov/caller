@@ -12,10 +12,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	dailyLimit = 3
-	ownerID    = 821788740
-)
+const ownerID = 821788740
 
 func initDB(db *sql.DB) error {
 	_, err := db.Exec(`
@@ -26,90 +23,45 @@ func initDB(db *sql.DB) error {
 			username   TEXT   NOT NULL DEFAULT '',
 			PRIMARY KEY (chat_id, user_id)
 		);
-		CREATE TABLE IF NOT EXISTS call_usage (
-			chat_id    BIGINT NOT NULL,
-			user_id    BIGINT NOT NULL,
-			used_date  DATE   NOT NULL DEFAULT CURRENT_DATE,
-			count      INT    NOT NULL DEFAULT 0,
-			PRIMARY KEY (chat_id, user_id, used_date)
-		);
-		CREATE TABLE IF NOT EXISTS user_limits (
-			user_id     BIGINT PRIMARY KEY,
-			daily_limit INT    NOT NULL
+		CREATE TABLE IF NOT EXISTS blocked_users (
+			user_id BIGINT PRIMARY KEY
 		);
 	`)
 	return err
 }
 
-func getUserLimit(db *sql.DB, userID int64) int {
-	var limit int
-	err := db.QueryRow(`SELECT daily_limit FROM user_limits WHERE user_id = $1`, userID).Scan(&limit)
-	if err == sql.ErrNoRows {
-		return dailyLimit
-	}
-	if err != nil {
-		log.Printf("getUserLimit error: %v", err)
-		return dailyLimit
-	}
-	return limit
+func isBlocked(db *sql.DB, userID int64) bool {
+	var id int64
+	err := db.QueryRow(`SELECT user_id FROM blocked_users WHERE user_id = $1`, userID).Scan(&id)
+	return err == nil
 }
 
-func setUserLimit(db *sql.DB, userID int64, limit int) error {
-	if limit == 0 {
-		_, err := db.Exec(`DELETE FROM user_limits WHERE user_id = $1`, userID)
-		return err
-	}
-	_, err := db.Exec(`
-		INSERT INTO user_limits (user_id, daily_limit) VALUES ($1, $2)
-		ON CONFLICT (user_id) DO UPDATE SET daily_limit = EXCLUDED.daily_limit
-	`, userID, limit)
+func blockUser(db *sql.DB, userID int64) error {
+	_, err := db.Exec(`INSERT INTO blocked_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, userID)
 	return err
 }
 
-func getAllLimits(db *sql.DB) (map[int64]int, error) {
-	rows, err := db.Query(`SELECT user_id, daily_limit FROM user_limits`)
+func unblockUser(db *sql.DB, userID int64) error {
+	_, err := db.Exec(`DELETE FROM blocked_users WHERE user_id = $1`, userID)
+	return err
+}
+
+func getBlockedUsers(db *sql.DB) ([]int64, error) {
+	rows, err := db.Query(`SELECT user_id FROM blocked_users`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := make(map[int64]int)
+
+	var ids []int64
 	for rows.Next() {
-		var userID int64
-		var limit int
-		if err := rows.Scan(&userID, &limit); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		result[userID] = limit
+		ids = append(ids, id)
 	}
-	return result, nil
-}
-
-func checkAndIncrement(db *sql.DB, chatID, userID int64) (remaining int, err error) {
-	limit := getUserLimit(db, userID)
-	if limit < 0 {
-		return 999, nil // unlimited
-	}
-
-	var count int
-	err = db.QueryRow(`
-		INSERT INTO call_usage (chat_id, user_id, used_date, count)
-		VALUES ($1, $2, CURRENT_DATE, 1)
-		ON CONFLICT (chat_id, user_id, used_date) DO UPDATE
-			SET count = call_usage.count + 1
-		RETURNING count
-	`, chatID, userID).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-
-	if count > limit {
-		db.Exec(`
-			UPDATE call_usage SET count = count - 1
-			WHERE chat_id = $1 AND user_id = $2 AND used_date = CURRENT_DATE
-		`, chatID, userID)
-		return -1, nil
-	}
-	return limit - count, nil
+	return ids, nil
 }
 
 func saveUser(db *sql.DB, chatID, userID int64, username, firstName string) {
@@ -193,56 +145,52 @@ func handleOwnerCommand(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message)
 	chatID := msg.Chat.ID
 
 	switch msg.Command() {
-	case "setlimit":
-		// /setlimit USER_ID LIMIT
-		args := strings.Fields(msg.CommandArguments())
-		if len(args) != 2 {
-			bot.Send(tgbotapi.NewMessage(chatID, "Использование: /setlimit USER_ID LIMIT\n\nПример: /setlimit 123456789 5\nДля сброса лимита: /setlimit 123456789 0 (вернёт к дефолту)"))
-			return
-		}
-
-		userID, err := strconv.ParseInt(args[0], 10, 64)
+	case "block":
+		// /block USER_ID
+		arg := strings.TrimSpace(msg.CommandArguments())
+		userID, err := strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный USER_ID"))
+			bot.Send(tgbotapi.NewMessage(chatID, "Использование: /block USER_ID"))
 			return
 		}
-
-		limit, err := strconv.Atoi(args[1])
-		if err != nil || limit < 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, "❌ Неверный лимит"))
-			return
-		}
-
-		if err := setUserLimit(db, userID, limit); err != nil {
+		if err := blockUser(db, userID); err != nil {
 			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
 			return
 		}
+		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("🚫 Пользователь %d заблокирован", userID)))
 
-		if limit == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Лимит для %d сброшен (дефолт: %d)", userID, dailyLimit)))
-		} else {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Лимит для %d установлен: %d раз/день", userID, limit)))
+	case "unblock":
+		// /unblock USER_ID
+		arg := strings.TrimSpace(msg.CommandArguments())
+		userID, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, "Использование: /unblock USER_ID"))
+			return
 		}
+		if err := unblockUser(db, userID); err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
+			return
+		}
+		bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Пользователь %d разблокирован", userID)))
 
-	case "limits":
-		limits, err := getAllLimits(db)
-		if err != nil || len(limits) == 0 {
-			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Кастомных лимитов нет. Дефолт: %d раз/день", dailyLimit)))
+	case "blocked":
+		ids, err := getBlockedUsers(db)
+		if err != nil || len(ids) == 0 {
+			bot.Send(tgbotapi.NewMessage(chatID, "Заблокированных пользователей нет."))
 			return
 		}
 		var sb strings.Builder
-		sb.WriteString("📋 Кастомные лимиты:\n\n")
-		for uid, lim := range limits {
-			sb.WriteString(fmt.Sprintf("• %d → %d раз/день\n", uid, lim))
+		sb.WriteString("🚫 Заблокированные:\n\n")
+		for _, id := range ids {
+			sb.WriteString(fmt.Sprintf("• %d\n", id))
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, sb.String()))
 
 	case "start", "help":
 		help := "Команды владельца:\n\n" +
-			"/setlimit USER_ID N — установить лимит N раз/день\n" +
-			"/setlimit USER_ID 0 — сбросить к дефолту\n" +
-			"/limits — список кастомных лимитов\n\n" +
-			fmt.Sprintf("Дефолтный лимит: %d раз/день", dailyLimit)
+			"/block USER_ID — закрыть доступ к /all\n" +
+			"/unblock USER_ID — открыть доступ\n" +
+			"/blocked — список заблокированных"
 		bot.Send(tgbotapi.NewMessage(chatID, help))
 	}
 }
@@ -274,6 +222,12 @@ func main() {
 	}
 
 	log.Printf("Authorized as @%s", bot.Self.UserName)
+
+	// Register visible commands for users
+	bot.Send(tgbotapi.NewSetMyCommands(
+		tgbotapi.BotCommand{Command: "all", Description: "Тегнуть всех участников чата"},
+		tgbotapi.BotCommand{Command: "help", Description: "Помощь"},
+	))
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -315,15 +269,8 @@ func main() {
 				continue
 			}
 
-			remaining, err := checkAndIncrement(db, chatID, msg.From.ID)
-			if err != nil {
-				log.Printf("checkAndIncrement error: %v", err)
-				continue
-			}
-
-			if remaining == -1 {
-				limit := getUserLimit(db, msg.From.ID)
-				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Лимит исчерпан. Можно использовать /all не более %d раз в день.", limit))
+			if isBlocked(db, msg.From.ID) {
+				reply := tgbotapi.NewMessage(chatID, "❌ У вас нет доступа к этой команде.")
 				reply.ReplyToMessageID = msg.MessageID
 				bot.Send(reply)
 				continue
@@ -344,8 +291,7 @@ func main() {
 			}
 
 		case "start", "help":
-			limit := getUserLimit(db, msg.From.ID)
-			help := fmt.Sprintf("Команды:\n/all — тегнуть всех участников чата (лимит: %d раз в день)\n\nБот запоминает участников, которые писали в чат или вступили в него.", limit)
+			help := "Команды:\n/all — тегнуть всех участников чата"
 			reply := tgbotapi.NewMessage(chatID, help)
 			if _, err := bot.Send(reply); err != nil {
 				log.Printf("send error: %v", err)
