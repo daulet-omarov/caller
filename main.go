@@ -186,11 +186,38 @@ func handleOwnerCommand(bot *tgbotapi.BotAPI, db *sql.DB, msg *tgbotapi.Message)
 		}
 		bot.Send(tgbotapi.NewMessage(chatID, sb.String()))
 
+	case "users":
+		rows, err := db.Query(`SELECT user_id, username, first_name FROM chat_users ORDER BY first_name`)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err)))
+			return
+		}
+		defer rows.Close()
+
+		var sb strings.Builder
+		sb.WriteString("👥 Пользователи:\n\n")
+		count := 0
+		for rows.Next() {
+			var userID int64
+			var username, firstName string
+			if err := rows.Scan(&userID, &username, &firstName); err != nil {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("• %d | @%s | %s\n", userID, username, firstName))
+			count++
+		}
+		if count == 0 {
+			bot.Send(tgbotapi.NewMessage(chatID, "Пользователей нет."))
+			return
+		}
+		bot.Send(tgbotapi.NewMessage(chatID, sb.String()))
+
 	case "start", "help":
 		help := "Команды владельца:\n\n" +
 			"/block USER_ID — закрыть доступ к /all\n" +
 			"/unblock USER_ID — открыть доступ\n" +
-			"/blocked — список заблокированных"
+			"/blocked — список заблокированных\n" +
+			"/users — список всех пользователей"
 		bot.Send(tgbotapi.NewMessage(chatID, help))
 	}
 }
