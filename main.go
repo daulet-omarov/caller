@@ -2,10 +2,8 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	_ "github.com/lib/pq"
@@ -14,9 +12,10 @@ import (
 func initDB(db *sql.DB) error {
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS chat_users (
-			chat_id BIGINT NOT NULL,
-			user_id BIGINT NOT NULL,
-			mention TEXT NOT NULL,
+			chat_id    BIGINT NOT NULL,
+			user_id    BIGINT NOT NULL,
+			first_name TEXT   NOT NULL DEFAULT '',
+			username   TEXT   NOT NULL DEFAULT '',
 			PRIMARY KEY (chat_id, user_id)
 		)
 	`)
@@ -24,38 +23,82 @@ func initDB(db *sql.DB) error {
 }
 
 func saveUser(db *sql.DB, chatID, userID int64, username, firstName string) {
-	var mention string
-	if username != "" {
-		mention = "@" + username
-	} else {
-		mention = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, userID, firstName)
-	}
 	_, err := db.Exec(`
-		INSERT INTO chat_users (chat_id, user_id, mention)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (chat_id, user_id) DO UPDATE SET mention = EXCLUDED.mention
-	`, chatID, userID, mention)
+		INSERT INTO chat_users (chat_id, user_id, first_name, username)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (chat_id, user_id) DO UPDATE
+			SET first_name = EXCLUDED.first_name,
+			    username   = EXCLUDED.username
+	`, chatID, userID, firstName, username)
 	if err != nil {
 		log.Printf("saveUser error: %v", err)
 	}
 }
 
-func getMentions(db *sql.DB, chatID int64) ([]string, error) {
-	rows, err := db.Query(`SELECT mention FROM chat_users WHERE chat_id = $1`, chatID)
+type userRecord struct {
+	userID    int64
+	firstName string
+}
+
+func getUsers(db *sql.DB, chatID int64) ([]userRecord, error) {
+	rows, err := db.Query(`SELECT user_id, first_name FROM chat_users WHERE chat_id = $1`, chatID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var mentions []string
+	var users []userRecord
 	for rows.Next() {
-		var m string
-		if err := rows.Scan(&m); err != nil {
+		var u userRecord
+		if err := rows.Scan(&u.userID, &u.firstName); err != nil {
 			return nil, err
 		}
-		mentions = append(mentions, m)
+		users = append(users, u)
 	}
-	return mentions, nil
+	return users, nil
+}
+
+// utf16Len returns the length of s in UTF-16 code units (Telegram uses UTF-16 offsets).
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= 0x10000 {
+			n += 2
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+func buildAllMessage(chatID int64, users []userRecord) tgbotapi.MessageConfig {
+	header := "📢 Жігіттер!"
+	headerLen := utf16Len(header)
+
+	// One zero-width space per user — invisible but carries the mention entity
+	invisible := ""
+	for range users {
+		invisible += "​"
+	}
+
+	text := header + invisible
+
+	entities := make([]tgbotapi.MessageEntity, len(users))
+	for i, u := range users {
+		entities[i] = tgbotapi.MessageEntity{
+			Type:   "text_mention",
+			Offset: headerLen + i,
+			Length: 1,
+			User: &tgbotapi.User{
+				ID:        u.userID,
+				FirstName: u.firstName,
+			},
+		}
+	}
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.Entities = entities
+	return msg
 }
 
 func main() {
@@ -114,17 +157,13 @@ func main() {
 
 		switch msg.Command() {
 		case "all":
-			mentions, err := getMentions(db, chatID)
+			users, err := getUsers(db, chatID)
 			var reply tgbotapi.MessageConfig
 
-			if err != nil || len(mentions) == 0 {
+			if err != nil || len(users) == 0 {
 				reply = tgbotapi.NewMessage(chatID, "Нет известных участников. Участники добавляются автоматически когда пишут в чат.")
 			} else {
-				// Hidden mentions wrapped in invisible tag — triggers notifications without showing names
-				hidden := `<span class="tg-spoiler">` + strings.Join(mentions, " ") + `</span>`
-				text := "📢 Жігіттер!\n" + hidden
-				reply = tgbotapi.NewMessage(chatID, text)
-				reply.ParseMode = tgbotapi.ModeHTML
+				reply = buildAllMessage(chatID, users)
 			}
 
 			reply.ReplyToMessageID = msg.MessageID
@@ -133,8 +172,7 @@ func main() {
 			}
 
 		case "start", "help":
-			help := "Команды:\n/all — тегнуть всех участников чата\n\n" +
-				"Бот запоминает участников, которые писали в чат или вступили в него."
+			help := "Команды:\n/all — тегнуть всех участников чата\n\nБот запоминает участников, которые писали в чат или вступили в него."
 			reply := tgbotapi.NewMessage(chatID, help)
 			if _, err := bot.Send(reply); err != nil {
 				log.Printf("send error: %v", err)
