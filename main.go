@@ -112,7 +112,8 @@ func utf16Len(s string) int {
 	return n
 }
 
-func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.MessageConfig {
+func buildAllMessage(chatID int64, users []userRecord) tgbotapi.MessageConfig {
+	header := "📢 Жігіттер!"
 	headerLen := utf16Len(header)
 
 	invisible := ""
@@ -292,15 +293,9 @@ func main() {
 			if msg.From != nil && !isBlocked(db, msg.From.ID) {
 				users, err := getUsers(db, chatID)
 				if err == nil && len(users) > 0 {
-					// Strip the trigger word, use the rest as header
-					header := strings.TrimSpace(msg.Text[len("калл"):])
-					if strings.HasPrefix(lower, "call") {
-						header = strings.TrimSpace(msg.Text[len("call"):])
-					}
-					if header == "" {
-						header = "📢"
-					}
-					bot.Send(buildAllMessage(chatID, users, header))
+					reply := buildAllMessage(chatID, users)
+					reply.ReplyToMessageID = msg.MessageID
+					bot.Send(reply)
 				}
 			}
 			continue
@@ -329,7 +324,7 @@ func main() {
 			if err != nil || len(users) == 0 {
 				reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
 			} else {
-				reply = buildAllMessage(chatID, users, "📢 Жігіттер!")
+				reply = buildAllMessage(chatID, users)
 			}
 
 			reply.ReplyToMessageID = msg.MessageID
