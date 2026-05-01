@@ -1,52 +1,61 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"strings"
-	"sync"
 
+	_ "github.com/lib/pq"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// chatUsers stores known users per chat (chatID -> map[userID]username)
-type chatUsers struct {
-	mu   sync.RWMutex
-	data map[int64]map[int64]string
+func initDB(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS chat_users (
+			chat_id BIGINT NOT NULL,
+			user_id BIGINT NOT NULL,
+			mention TEXT NOT NULL,
+			PRIMARY KEY (chat_id, user_id)
+		)
+	`)
+	return err
 }
 
-func newChatUsers() *chatUsers {
-	return &chatUsers{data: make(map[int64]map[int64]string)}
-}
-
-func (c *chatUsers) add(chatID, userID int64, username, firstName string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if _, ok := c.data[chatID]; !ok {
-		c.data[chatID] = make(map[int64]string)
-	}
-	// Prefer @username for mention, fall back to first name with inline mention
+func saveUser(db *sql.DB, chatID, userID int64, username, firstName string) {
+	var mention string
 	if username != "" {
-		c.data[chatID][userID] = "@" + username
+		mention = "@" + username
 	} else {
-		// HTML inline mention for users without @username
-		c.data[chatID][userID] = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, userID, firstName)
+		mention = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, userID, firstName)
+	}
+	_, err := db.Exec(`
+		INSERT INTO chat_users (chat_id, user_id, mention)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (chat_id, user_id) DO UPDATE SET mention = EXCLUDED.mention
+	`, chatID, userID, mention)
+	if err != nil {
+		log.Printf("saveUser error: %v", err)
 	}
 }
 
-func (c *chatUsers) mentions(chatID int64) []string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	users, ok := c.data[chatID]
-	if !ok {
-		return nil
+func getMentions(db *sql.DB, chatID int64) ([]string, error) {
+	rows, err := db.Query(`SELECT mention FROM chat_users WHERE chat_id = $1`, chatID)
+	if err != nil {
+		return nil, err
 	}
-	result := make([]string, 0, len(users))
-	for _, mention := range users {
-		result = append(result, mention)
+	defer rows.Close()
+
+	var mentions []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		mentions = append(mentions, m)
 	}
-	return result
+	return mentions, nil
 }
 
 func main() {
@@ -55,14 +64,27 @@ func main() {
 		log.Fatal("TELEGRAM_TOKEN environment variable is required")
 	}
 
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := initDB(db); err != nil {
+		log.Fatal("initDB:", err)
+	}
+
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("Authorized as @%s", bot.Self.UserName)
-
-	known := newChatUsers()
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -76,15 +98,13 @@ func main() {
 		msg := update.Message
 		chatID := msg.Chat.ID
 
-		// Track every user who sends a message
 		if msg.From != nil {
-			known.add(chatID, msg.From.ID, msg.From.UserName, msg.From.FirstName)
+			saveUser(db, chatID, msg.From.ID, msg.From.UserName, msg.From.FirstName)
 		}
 
-		// Track new members who join the chat
 		if msg.NewChatMembers != nil {
 			for _, member := range msg.NewChatMembers {
-				known.add(chatID, member.ID, member.UserName, member.FirstName)
+				saveUser(db, chatID, member.ID, member.UserName, member.FirstName)
 			}
 		}
 
@@ -94,10 +114,10 @@ func main() {
 
 		switch msg.Command() {
 		case "all":
-			mentions := known.mentions(chatID)
+			mentions, err := getMentions(db, chatID)
 			var reply tgbotapi.MessageConfig
 
-			if len(mentions) == 0 {
+			if err != nil || len(mentions) == 0 {
 				reply = tgbotapi.NewMessage(chatID, "Нет известных участников. Участники добавляются автоматически когда пишут в чат.")
 			} else {
 				text := strings.Join(mentions, " ")
