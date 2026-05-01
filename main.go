@@ -289,23 +289,33 @@ func main() {
 
 		lower := strings.ToLower(msg.Text)
 		if lower == "калл" || strings.HasPrefix(lower, "калл ") || lower == "call" || strings.HasPrefix(lower, "call ") {
-			if msg.From != nil && !isBlocked(db, msg.From.ID) {
-				users, err := getUsers(db, chatID)
-				if err == nil && len(users) > 0 {
-					// Strip the trigger word, use the rest as header
-					var header string
-					switch {
-					case strings.HasPrefix(lower, "калл"):
-						header = strings.TrimSpace(msg.Text[len("калл"):])
-					case strings.HasPrefix(lower, "call"):
-						header = strings.TrimSpace(msg.Text[len("call"):])
-					}
-					if header == "" {
-						header = "📢"
-					}
-					bot.Send(buildAllMessage(chatID, users, header))
-				}
+			if msg.From == nil {
+				continue
 			}
+
+			if isBlocked(db, msg.From.ID) {
+				reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
+				reply.ReplyToMessageID = msg.MessageID
+				bot.Send(reply)
+				continue
+			}
+
+			users, err := getUsers(db, chatID)
+			if err == nil && len(users) > 0 {
+				// Strip the trigger word, use the rest as header
+				var header string
+				switch {
+				case strings.HasPrefix(lower, "калл"):
+					header = strings.TrimSpace(msg.Text[len("калл"):])
+				case strings.HasPrefix(lower, "call"):
+					header = strings.TrimSpace(msg.Text[len("call"):])
+				}
+				if header == "" {
+					header = "📢"
+				}
+				bot.Send(buildAllMessage(chatID, users, header))
+			}
+
 			continue
 		}
 
