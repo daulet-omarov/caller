@@ -294,7 +294,7 @@ func main() {
 			}
 
 			if isBlocked(db, msg.From.ID) {
-				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ %s %s (%s), сенде бұл командаға қолжетімділік жоқ.", msg.From.FirstName, msg.From.LastName, msg.From.UserName))
+				reply := tgbotapi.NewMessage(chatID, "❌ Сенде бұл командаға қолжетімділік жоқ.")
 				reply.ReplyToMessageID = msg.MessageID
 				bot.Send(reply)
 				continue
@@ -313,7 +313,6 @@ func main() {
 				if header == "" {
 					header = "📢"
 				}
-				header = fmt.Sprintf("%s\n\n%s %s (%s)", header, msg.From.FirstName, msg.From.LastName, msg.From.UserName)
 				bot.Send(buildAllMessage(chatID, users, header))
 			}
 
@@ -326,31 +325,30 @@ func main() {
 
 		switch msg.Command() {
 		case "all":
-			continue
-			//if msg.From == nil {
-			//	continue
-			//}
-			//
-			//if isBlocked(db, msg.From.ID) {
-			//	reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
-			//	reply.ReplyToMessageID = msg.MessageID
-			//	bot.Send(reply)
-			//	continue
-			//}
-			//
-			//users, err := getUsers(db, chatID)
-			//var reply tgbotapi.MessageConfig
-			//
-			//if err != nil || len(users) == 0 {
-			//	reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
-			//} else {
-			//	reply = buildAllMessage(chatID, users, "📢 Жігіттер!")
-			//}
-			//
-			//reply.ReplyToMessageID = msg.MessageID
-			//if _, err := bot.Send(reply); err != nil {
-			//	log.Printf("send error: %v", err)
-			//}
+			if msg.From == nil {
+				continue
+			}
+
+			if isBlocked(db, msg.From.ID) {
+				reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
+				reply.ReplyToMessageID = msg.MessageID
+				bot.Send(reply)
+				continue
+			}
+
+			users, err := getUsers(db, chatID)
+			var reply tgbotapi.MessageConfig
+
+			if err != nil || len(users) == 0 {
+				reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
+			} else {
+				reply = buildAllMessage(chatID, users, "📢 Жігіттер!")
+			}
+
+			reply.ReplyToMessageID = msg.MessageID
+			if _, err := bot.Send(reply); err != nil {
+				log.Printf("send error: %v", err)
+			}
 
 		case "start", "help":
 			help := "Командалар:\n/all — чаттың барлық қатысушыларын белгілеу (калл/call)"
