@@ -253,7 +253,7 @@ func main() {
 
 	// Register visible commands for users
 	bot.Send(tgbotapi.NewSetMyCommands(
-		tgbotapi.BotCommand{Command: "all", Description: "Чаттың барлық қатысушыларын белгілеу"},
+		tgbotapi.BotCommand{Command: "all", Description: "Чаттың барлық қатысушыларын белгілеу (калл/call)"},
 		tgbotapi.BotCommand{Command: "help", Description: "Анықтама"},
 	))
 
@@ -294,7 +294,7 @@ func main() {
 			}
 
 			if isBlocked(db, msg.From.ID) {
-				reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
+				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ %s %s (%s), сенде бұл командаға қолжетімділік жоқ.", msg.From.FirstName, msg.From.LastName, msg.From.UserName))
 				reply.ReplyToMessageID = msg.MessageID
 				bot.Send(reply)
 				continue
@@ -313,6 +313,7 @@ func main() {
 				if header == "" {
 					header = "📢"
 				}
+				header = fmt.Sprintf("%s %s %s (%s)", header, msg.From.FirstName, msg.From.LastName, msg.From.UserName)
 				bot.Send(buildAllMessage(chatID, users, header))
 			}
 
@@ -325,33 +326,34 @@ func main() {
 
 		switch msg.Command() {
 		case "all":
-			if msg.From == nil {
-				continue
-			}
-
-			if isBlocked(db, msg.From.ID) {
-				reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
-				reply.ReplyToMessageID = msg.MessageID
-				bot.Send(reply)
-				continue
-			}
-
-			users, err := getUsers(db, chatID)
-			var reply tgbotapi.MessageConfig
-
-			if err != nil || len(users) == 0 {
-				reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
-			} else {
-				reply = buildAllMessage(chatID, users, "📢 Жігіттер!")
-			}
-
-			reply.ReplyToMessageID = msg.MessageID
-			if _, err := bot.Send(reply); err != nil {
-				log.Printf("send error: %v", err)
-			}
+			continue
+			//if msg.From == nil {
+			//	continue
+			//}
+			//
+			//if isBlocked(db, msg.From.ID) {
+			//	reply := tgbotapi.NewMessage(chatID, "❌ Досым, сенде бұл командаға қолжетімділік жоқ.")
+			//	reply.ReplyToMessageID = msg.MessageID
+			//	bot.Send(reply)
+			//	continue
+			//}
+			//
+			//users, err := getUsers(db, chatID)
+			//var reply tgbotapi.MessageConfig
+			//
+			//if err != nil || len(users) == 0 {
+			//	reply = tgbotapi.NewMessage(chatID, "Белгілі қатысушылар жоқ.")
+			//} else {
+			//	reply = buildAllMessage(chatID, users, "📢 Жігіттер!")
+			//}
+			//
+			//reply.ReplyToMessageID = msg.MessageID
+			//if _, err := bot.Send(reply); err != nil {
+			//	log.Printf("send error: %v", err)
+			//}
 
 		case "start", "help":
-			help := "Командалар:\n/all — чаттың барлық қатысушыларын белгілеу"
+			help := "Командалар:\n/all — чаттың барлық қатысушыларын белгілеу (калл/call)"
 			reply := tgbotapi.NewMessage(chatID, help)
 			if _, err := bot.Send(reply); err != nil {
 				log.Printf("send error: %v", err)
