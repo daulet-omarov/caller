@@ -313,7 +313,7 @@ func main() {
 				if header == "" {
 					header = "📢"
 				}
-				header = fmt.Sprintf("\n%s %s %s (%s)", header, msg.From.FirstName, msg.From.LastName, msg.From.UserName)
+				header = fmt.Sprintf("%s\n\n%s %s (%s)", header, msg.From.FirstName, msg.From.LastName, msg.From.UserName)
 				bot.Send(buildAllMessage(chatID, users, header))
 			}
 
