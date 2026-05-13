@@ -117,7 +117,7 @@ func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.M
 
 	invisible := ""
 	for range users {
-		invisible += "​"
+		invisible += "\u200B"
 	}
 
 	text := header + invisible
