@@ -112,10 +112,7 @@ func utf16Len(s string) int {
 	return n
 }
 
-const explicitMention = "@kulmakhan_a "
-
 func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.MessageConfig {
-	prefixLen := utf16Len(explicitMention)
 	headerLen := utf16Len(header)
 
 	invisible := ""
@@ -123,13 +120,13 @@ func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.M
 		invisible += "\u200B"
 	}
 
-	text := explicitMention + header + invisible
+	text := header + invisible
 
 	entities := make([]tgbotapi.MessageEntity, len(users))
 	for i, u := range users {
 		entities[i] = tgbotapi.MessageEntity{
 			Type:   "text_mention",
-			Offset: prefixLen + headerLen + i,
+			Offset: headerLen + i,
 			Length: 1,
 			User: &tgbotapi.User{
 				ID:        u.userID,
