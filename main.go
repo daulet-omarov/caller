@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"html"
 	"log"
 	"os"
 	"strconv"
@@ -114,22 +113,22 @@ func utf16Len(s string) int {
 }
 
 func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.MessageConfig {
+	const invisible = "​" // zero-width space, 1 UTF-16 code unit
+
 	var sb strings.Builder
-	sb.WriteString(html.EscapeString(header))
-	sb.WriteString("\n")
-	for i, u := range users {
-		name := strings.TrimSpace(u.firstName)
-		if name == "" {
-			name = "user"
-		}
-		sb.WriteString(fmt.Sprintf(
-			`<a href="tg://user?id=%d">%s</a>`,
-			u.userID,
-			html.EscapeString(name),
-		))
-		if i < len(users)-1 {
-			sb.WriteString(", ")
-		}
+	sb.WriteString(header)
+	offset := utf16Len(header)
+
+	entities := make([]tgbotapi.MessageEntity, 0, len(users))
+	for _, u := range users {
+		sb.WriteString(invisible)
+		entities = append(entities, tgbotapi.MessageEntity{
+			Type:   "text_mention",
+			Offset: offset,
+			Length: 1,
+			User:   &tgbotapi.User{ID: u.userID},
+		})
+		offset++
 	}
 
 	log.Printf("chat_id=%d tagged %d users:", chatID, len(users))
@@ -138,7 +137,7 @@ func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.M
 	}
 
 	msg := tgbotapi.NewMessage(chatID, sb.String())
-	msg.ParseMode = "HTML"
+	msg.Entities = entities
 	return msg
 }
 
