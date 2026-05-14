@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"html"
 	"log"
 	"os"
 	"strconv"
@@ -113,30 +114,19 @@ func utf16Len(s string) int {
 }
 
 func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.MessageConfig {
-	headerLen := utf16Len(header)
-
-	invisible := ""
-	for range users {
-		invisible += "\u200B"
+	var sb strings.Builder
+	sb.WriteString(html.EscapeString(header))
+	for _, u := range users {
+		sb.WriteString(fmt.Sprintf(`<a href="tg://user?id=%d">🥵'"</a>`, u.userID))
 	}
 
-	text := header + invisible
-
-	entities := make([]tgbotapi.MessageEntity, len(users))
-	for i, u := range users {
-		entities[i] = tgbotapi.MessageEntity{
-			Type:   "text_mention",
-			Offset: headerLen + i,
-			Length: 1,
-			User: &tgbotapi.User{
-				ID:        u.userID,
-				FirstName: u.firstName,
-			},
-		}
+	log.Printf("chat_id=%d tagged %d users:", chatID, len(users))
+	for _, u := range users {
+		log.Printf("  user_id=%d first_name=%q", u.userID, u.firstName)
 	}
 
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.Entities = entities
+	msg := tgbotapi.NewMessage(chatID, sb.String())
+	msg.ParseMode = "HTML"
 	return msg
 }
 
