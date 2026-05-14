@@ -115,7 +115,7 @@ func utf16Len(s string) int {
 
 func buildAllMessage(chatID int64, users []userRecord, header string) tgbotapi.MessageConfig {
 	var sb strings.Builder
-	sb.WriteString(html.EscapeString(header))
+	sb.WriteString(html.EscapeString(header) + "\n\n")
 	for _, u := range users {
 		sb.WriteString(fmt.Sprintf(`<a href="tg://user?id=%d">🥵</a>`, u.userID))
 	}
